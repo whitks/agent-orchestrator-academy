@@ -1,0 +1,6 @@
+{
+    "events": [
+        {"name": "TechNova 2026", "category": "technical", "date": "2026-10-12 to 2026-10-14", "location": "Main Campus"},
+        {"name": "Symphony", "category": "cultural", "date": "2027-03-05 to 2027-03-07", "location": "Auditorium"}
+    ]
+}

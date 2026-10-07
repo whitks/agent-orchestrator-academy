@@ -1,0 +1,6 @@
+{
+    "deadlines": {
+        "exam_form": {"date": "2026-11-15", "late_fee_date": "2026-11-20", "late_fee_amount": 500},
+        "fee_payment": {"date": "2026-12-01", "late_fee_date": "2026-12-10", "late_fee_amount": 1000}
+    }
+}
