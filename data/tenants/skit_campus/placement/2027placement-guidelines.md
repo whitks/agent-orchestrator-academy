@@ -1,0 +1,1 @@
+1.student must do 3 nptel courses to be eligible for placements and must have cgpa of 7.0+

@@ -1,0 +1,1 @@
+we are creating a new hostel for all the students, you can visit your erp for more details ou will be able to register there.
