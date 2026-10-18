@@ -9,7 +9,7 @@ from app.agents.placement import PlacementAgent
 from app.agents.events import EventsAgent
 from app.agents.services import ServicesAgent
 from app.memory import MemoryStore
-from app.db import create_ticket
+from app.db import create_ticket, get_tenant
 from app.tracing import Tracer
 
 class Orchestrator:
@@ -23,7 +23,7 @@ class Orchestrator:
         self.memory = MemoryStore(max_turns=2)
         self.max_retries = 2
         
-    async def route(self, query: str, memory_context: Dict[str, Any]) -> Tuple[RouteDecision, TraceEvent]:
+    async def route(self, query: str, memory_context: Dict[str, Any], tenant_config: Optional[dict] = None) -> Tuple[RouteDecision, TraceEvent]:
         start_time = time.time()
         
         decision = None
@@ -84,7 +84,7 @@ class Orchestrator:
         from app.llm import call_synthesizer
         return await call_synthesizer(valid_results, failed_results)
 
-    async def _run_agent_with_timeout(self, agent_name: str, query: str, memory_context: Dict[str, Any], timeout: float = 12.0) -> Tuple[Optional[AgentResult], TraceEvent]:
+    async def _run_agent_with_timeout(self, agent_name: str, query: str, memory_context: Dict[str, Any], tenant_id: str = "apex_university", tenant_config: Optional[dict] = None, timeout: float = 12.0) -> Tuple[Optional[AgentResult], TraceEvent]:
         agent = self.agents.get(agent_name)
         if not agent:
             raise ValueError(f"Agent {agent_name} not found")
@@ -95,7 +95,7 @@ class Orchestrator:
         
         for attempt in range(self.max_retries + 1):
             try:
-                result = await asyncio.wait_for(agent.run(query, memory=memory_context), timeout=timeout)
+                result = await asyncio.wait_for(agent.run(query, memory=memory_context, tenant_id=tenant_id, tenant_config=tenant_config), timeout=timeout)
                 error = None
                 if result.status == "ok":
                     break
@@ -112,13 +112,14 @@ class Orchestrator:
         latency = (time.time() - start_time) * 1000
         trace = TraceEvent(
             timestamp=datetime.utcnow().isoformat(), step=f"Execute:{agent_name}", agent=agent.name,
-            input={"query": query, "memory": memory_context}, output=result.model_dump() if not error else {"error": error},
-            latency_ms=latency, tokens_used=80
+            input={"query": query, "memory": memory_context, "tenant_id": tenant_id}, output=result.model_dump() if not error else {"error": error},
+            latency_ms=latency, tenant_id=tenant_id, tokens_used=80
         )
         return result, trace
 
-    async def handle(self, session_id: str, message: str) -> ChatResponse:
-        tracer = Tracer(session_id)
+    async def handle(self, session_id: str, message: str, tenant_id: str = "apex_university") -> ChatResponse:
+        tracer = Tracer(session_id, tenant_id=tenant_id)
+        tenant_config = get_tenant(tenant_id)
         
         # 1. Query Rewrite
         start_time = time.time()
@@ -137,13 +138,13 @@ class Orchestrator:
         latency = (time.time() - start_time) * 1000
         tracer.add_trace(TraceEvent(
             timestamp=datetime.utcnow().isoformat(), step="QueryRewrite", agent="System",
-            input={"query": message}, output={"rewritten_query": rewritten_query}, latency_ms=latency, tokens_used=15
+            input={"query": message}, output={"rewritten_query": rewritten_query}, latency_ms=latency, tenant_id=tenant_id, tokens_used=15
         ))
         
         memory_context = self.memory.get_context(session_id)
         
         # 2. Router Call
-        decision, route_trace = await self.route(rewritten_query, memory_context)
+        decision, route_trace = await self.route(rewritten_query, memory_context, tenant_config)
         tracer.route_domains = decision.domains
         tracer.add_trace(route_trace)
         
@@ -153,7 +154,7 @@ class Orchestrator:
             tracer.close()
             response = ChatResponse(
                 final_answer="I'm not completely sure what you mean. Could you clarify your question?",
-                agents_used=[], sources=[], trace=tracer.traces, escalated=False
+                agents_used=[], sources=[], trace=tracer.traces, escalated=False, tenant_id=tenant_id
             )
             self.memory.add_turn(session_id, message, response.final_answer)
             return response
@@ -163,13 +164,13 @@ class Orchestrator:
             tracer.close()
             response = ChatResponse(
                 final_answer="I cannot answer this query as it falls outside my supported domains.",
-                agents_used=[], sources=[], trace=tracer.traces, escalated=True
+                agents_used=[], sources=[], trace=tracer.traces, escalated=True, tenant_id=tenant_id
             )
             self.memory.add_turn(session_id, message, response.final_answer)
             return response
             
         # 3. Execution (Concurrent)
-        tasks = [self._run_agent_with_timeout(d, rewritten_query, memory_context) for d in decision.domains if d in self.agents]
+        tasks = [self._run_agent_with_timeout(d, rewritten_query, memory_context, tenant_id=tenant_id, tenant_config=tenant_config) for d in decision.domains if d in self.agents]
         agent_outputs = await asyncio.gather(*tasks)
         
         valid_results = []
@@ -187,7 +188,7 @@ class Orchestrator:
                 
         # 4. Fallback Logic for Execution
         if not valid_results and failed_results:
-            ticket_id = create_ticket(session_id, rewritten_query)
+            ticket_id = create_ticket(session_id, rewritten_query, tenant_id=tenant_id)
             tracer.escalated = True
             tracer.fallback_triggered = True
             tracer.close()
@@ -197,6 +198,7 @@ class Orchestrator:
                 sources=[],
                 trace=tracer.traces,
                 escalated=True,
+                tenant_id=tenant_id,
                 escalation_details=EscalationDetails(
                     ticket_id=ticket_id,
                     suggested_contact="support@college.edu"
@@ -209,7 +211,7 @@ class Orchestrator:
         final_answer, combined_sources, synth_trace = await self.synthesize(valid_results, failed_results)
         tracer.add_trace(synth_trace)
         
-        tracer.escalated = len(failed_results) > 0
+        tracer.escalated = len(failed_results) > 0 and len(valid_results) == 0
         tracer.close()
         
         response = ChatResponse(
@@ -218,17 +220,20 @@ class Orchestrator:
             sources=combined_sources,
             trace=tracer.traces,
             escalated=tracer.escalated,
+            tenant_id=tenant_id,
             escalation_details=None
         )
         
         self.memory.add_turn(session_id, message, response.final_answer)
         return response
 
-    async def stream_handle(self, session_id: str, message: str):
-        tracer = Tracer(session_id)
+    async def stream_handle(self, session_id: str, message: str, tenant_id: str = "apex_university"):
+        tracer = Tracer(session_id, tenant_id=tenant_id)
+        tenant_config = get_tenant(tenant_id) or {"name": "Campus Assistant", "theme_color": "#4f46e5"}
+        college_name = tenant_config.get("name", "Campus Assistant")
         start_time = time.time()
         
-        yield {"event": "progress", "step": "rewrite", "message": "Analyzing & resolving conversational context..."}
+        yield {"event": "progress", "step": "rewrite", "message": f"Analyzing query for {college_name}..."}
         
         # 1. Query Rewrite
         rewritten_query = message
@@ -245,13 +250,13 @@ class Orchestrator:
         memory_context = self.memory.get_context(session_id)
         tracer.add_trace(TraceEvent(
             timestamp=datetime.utcnow().isoformat(), step="QueryRewrite", agent="System",
-            input={"query": message}, output={"rewritten_query": rewritten_query}, latency_ms=(time.time() - start_time) * 1000, tokens_used=15
+            input={"query": message}, output={"rewritten_query": rewritten_query}, latency_ms=(time.time() - start_time) * 1000, tenant_id=tenant_id, tokens_used=15
         ))
         
         yield {"event": "progress", "step": "routing", "message": f"Classifying query intent: '{rewritten_query}'"}
         
         # 2. Router Call
-        decision, route_trace = await self.route(rewritten_query, memory_context)
+        decision, route_trace = await self.route(rewritten_query, memory_context, tenant_config)
         tracer.route_domains = decision.domains
         tracer.add_trace(route_trace)
         
@@ -260,7 +265,8 @@ class Orchestrator:
             "domains": decision.domains,
             "reasoning": decision.reasoning,
             "is_multi_domain": decision.is_multi_domain,
-            "confidence": decision.confidence
+            "confidence": decision.confidence,
+            "tenant_id": tenant_id
         }
         
         if decision.confidence < 0.6:
@@ -269,7 +275,7 @@ class Orchestrator:
             msg = "I'm not completely sure what you mean. Could you clarify your question?"
             self.memory.add_turn(session_id, message, msg)
             yield {"event": "final_answer_tokens", "data": msg}
-            yield {"event": "done", "message": "Stream completed", "agents": [], "sources": [], "escalated": False, "traces": [t.model_dump() for t in tracer.traces]}
+            yield {"event": "done", "message": "Stream completed", "agents": [], "sources": [], "escalated": False, "tenant_id": tenant_id, "traces": [t.model_dump() for t in tracer.traces]}
             return
             
         if not decision.domains:
@@ -278,13 +284,13 @@ class Orchestrator:
             msg = "I cannot answer this query as it falls outside my supported domains."
             self.memory.add_turn(session_id, message, msg)
             yield {"event": "final_answer_tokens", "data": msg}
-            yield {"event": "done", "message": "Stream completed", "agents": [], "sources": [], "escalated": True, "traces": [t.model_dump() for t in tracer.traces]}
+            yield {"event": "done", "message": "Stream completed", "agents": [], "sources": [], "escalated": True, "tenant_id": tenant_id, "traces": [t.model_dump() for t in tracer.traces]}
             return
             
         yield {"event": "progress", "step": "execution", "message": f"Dispatching query to domain agents: {', '.join(decision.domains)}"}
         
         # 3. Execution (Concurrent)
-        tasks = [self._run_agent_with_timeout(d, rewritten_query, memory_context) for d in decision.domains if d in self.agents]
+        tasks = [self._run_agent_with_timeout(d, rewritten_query, memory_context, tenant_id=tenant_id, tenant_config=tenant_config) for d in decision.domains if d in self.agents]
         agent_outputs = await asyncio.gather(*tasks)
         
         valid_results = []
@@ -295,8 +301,6 @@ class Orchestrator:
             tracer.add_trace(trace)
             if result:
                 agents_used.append(result.agent_name)
-                # Guardrail: If an agent answered part of the query with good confidence/sources or answered partially,
-                # count it as valid result so synthesizer can merge it!
                 if result.status == "ok" or (result.status == "insufficient_evidence" and result.sources and result.confidence >= 0.5):
                     valid_results.append(result)
                 else:
@@ -308,18 +312,19 @@ class Orchestrator:
                 "status": result.status if result else "error",
                 "confidence": result.confidence if result else 0.0,
                 "sources": result.sources if result else [],
+                "tenant_id": tenant_id,
                 "answer_preview": (result.answer[:120] + "...") if result and len(result.answer) > 120 else (result.answer if result else "")
             }
                     
         if not valid_results and failed_results:
-            ticket_id = create_ticket(session_id, rewritten_query)
+            ticket_id = create_ticket(session_id, rewritten_query, tenant_id=tenant_id)
             tracer.escalated = True
             tracer.fallback_triggered = True
             tracer.close()
-            fallback_msg = "I couldn't find this in official college records. A support ticket has been opened."
+            fallback_msg = f"I couldn't find this in official {college_name} records. A support ticket has been opened."
             self.memory.add_turn(session_id, message, fallback_msg)
             yield {"event": "final_answer_tokens", "data": fallback_msg}
-            yield {"event": "done", "message": "Stream completed", "agents": agents_used, "sources": [], "escalated": True, "ticket_id": ticket_id, "traces": [t.model_dump() for t in tracer.traces]}
+            yield {"event": "done", "message": "Stream completed", "agents": agents_used, "sources": [], "escalated": True, "ticket_id": ticket_id, "tenant_id": tenant_id, "traces": [t.model_dump() for t in tracer.traces]}
             return
             
         yield {"event": "progress", "step": "synthesis", "message": "Synthesizing cohesive multi-domain response..."}
@@ -340,5 +345,6 @@ class Orchestrator:
             "agents": agents_used,
             "sources": combined_sources,
             "escalated": tracer.escalated,
+            "tenant_id": tenant_id,
             "traces": [t.model_dump() for t in tracer.traces]
         }

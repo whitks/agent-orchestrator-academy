@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Embed Widget Test Portal</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      padding: 40px;
+      background: #f1f5f9;
+      color: #1e293b;
+    }
+    .card {
+      max-width: 600px;
+      margin: 40px auto;
+      background: #ffffff;
+      padding: 30px;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+    }
+    h1 { margin-top: 0; font-size: 24px; }
+    p { line-height: 1.6; color: #475569; }
+    code { background: #f8fafc; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Welcome to Apex University Student Portal</h1>
+    <p>This page simulates an external university website testing the <strong>Agent College Embeddable Widget</strong>.</p>
+    <p>Look at the bottom right corner for the floating advisor launcher button!</p>
+    <p>The widget is loaded via a simple <code>&lt;script&gt;</code> tag with <code>data-tenant-id="apex_university"</code>.</p>
+  </div>
+
+  <!-- Agent College Drop-In Embed -->
+  <script 
+    src="http://localhost:8000/widget.js" 
+    data-tenant-id="apex_university"
+    data-api-url="http://localhost:8000"
+    defer>
+  </script>
+</body>
+</html>

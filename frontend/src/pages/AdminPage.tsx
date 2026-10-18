@@ -1,24 +1,45 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import type { Tenant } from '../api/client';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { ShieldAlert, BarChart3, Clock, AlertCircle, RefreshCw, FileText } from 'lucide-react';
+import { ShieldAlert, BarChart3, Clock, AlertCircle, RefreshCw, FileText, Building, Key } from 'lucide-react';
 
 export default function AdminPage() {
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>('apex_university');
   const [metrics, setMetrics] = useState<any>(null);
   const [escalations, setEscalations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchData = () => {
+  // Fetch tenants on mount
+  useEffect(() => {
+    api.getTenants().then(res => {
+      if (res && res.tenants && res.tenants.length) {
+        setTenants(res.tenants);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const fetchData = (tenantId: string) => {
     setLoading(true);
     Promise.all([
-      api.getMetrics().then(setMetrics).catch(() => {}),
-      api.getEscalations().then(res => setEscalations(res.tickets || [])).catch(() => {})
+      api.getMetrics(tenantId).then(setMetrics).catch(() => {}),
+      api.getEscalations(tenantId).then(res => setEscalations(res.tickets || [])).catch(() => {})
     ]).finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    fetchData(selectedTenantId);
+  }, [selectedTenantId]);
+
+  const activeTenant = tenants.find(t => t.tenant_id === selectedTenantId) || {
+    tenant_id: 'apex_university',
+    name: 'Apex Institute of Technology',
+    slug: 'apex',
+    theme_color: '#4f46e5',
+    api_key: 'pk_live_apex_sample',
+    domain_whitelist: []
+  };
 
   const chartData = metrics?.route_distribution
     ? Object.entries(metrics.route_distribution).map(([name, count]) => ({
@@ -30,21 +51,62 @@ export default function AdminPage() {
   return (
     <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-8 max-w-5xl mx-auto w-full space-y-7">
       {/* Top Header section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-200/60">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200/60">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">Admin & Operations Control Center</h2>
+          <h2 className="text-xl font-bold tracking-tight text-slate-900">Multi-Tenant Admin & Operations Hub</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Real-time multi-agent routing metrics, ticket escalations, and system health
+            Real-time routing metrics, student escalation tickets, and API tenant configuration
           </p>
         </div>
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200/80 text-slate-700 text-xs font-semibold shadow-xs transition-colors cursor-pointer w-fit"
-        >
-          <RefreshCw size={12} className={loading ? 'animate-spin text-indigo-600' : 'text-slate-500'} />
-          <span>Refresh Data</span>
-        </button>
+
+        {/* Tenant Filter Selector */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 bg-white border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
+            <Building size={14} className="text-indigo-600 shrink-0" />
+            <select
+              value={selectedTenantId}
+              onChange={(e) => setSelectedTenantId(e.target.value)}
+              className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              {tenants.map(t => (
+                <option key={t.tenant_id} value={t.tenant_id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={() => fetchData(selectedTenantId)}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200/80 text-slate-700 text-xs font-semibold shadow-xs transition-colors cursor-pointer w-fit"
+          >
+            <RefreshCw size={12} className={loading ? 'animate-spin text-indigo-600' : 'text-slate-500'} />
+            <span>Refresh</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Tenant Credentials & Whitelist Card */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 p-4 sm:p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Public Embed API Key</span>
+          <div className="flex items-center gap-2 mt-1">
+            <Key size={14} className="text-indigo-600" />
+            <code className="text-xs font-mono font-bold text-slate-800 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200">
+              {activeTenant.api_key || `pk_live_${activeTenant.slug}_demo`}
+            </code>
+          </div>
+        </div>
+
+        <div className="text-xs text-slate-500 sm:text-right">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">Whitelisted Domains</span>
+          <span className="font-medium text-slate-700">
+            {activeTenant.domain_whitelist && activeTenant.domain_whitelist.length
+              ? activeTenant.domain_whitelist.join(', ')
+              : 'localhost, 127.0.0.1, *.edu'}
+          </span>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -52,7 +114,7 @@ export default function AdminPage() {
         {/* Fallback Rate */}
         <div className="bg-white rounded-2xl border border-slate-200/70 p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-            <span>Fallback & Guardrail Rate</span>
+            <span>Fallback Rate</span>
             <ShieldAlert size={16} className="text-amber-500" />
           </div>
           <div className="flex items-baseline gap-2">
@@ -79,7 +141,7 @@ export default function AdminPage() {
             <span className="text-xs text-slate-400">tickets</span>
           </div>
           <p className="text-[11.5px] text-slate-400 mt-2">
-            Awaiting campus department review or office clarification
+            Awaiting {activeTenant.name} staff review or office resolution
           </p>
         </div>
 
@@ -91,12 +153,12 @@ export default function AdminPage() {
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-3xl font-bold tracking-tight text-slate-900">
-              {metrics?.avg_latency_per_agent
+              {metrics?.avg_latency_per_agent && Object.keys(metrics.avg_latency_per_agent).length
                 ? `${Math.round(
                     Object.values(metrics.avg_latency_per_agent as Record<string, number>).reduce(
                       (a, b) => a + b,
                       0
-                    ) / Object.keys(metrics.avg_latency_per_agent).length || 0
+                    ) / Object.keys(metrics.avg_latency_per_agent).length
                   )}ms`
                 : '180ms'}
             </span>
@@ -116,10 +178,10 @@ export default function AdminPage() {
               <BarChart3 size={14} />
             </div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Routing Distribution Across Campus Domains
+              Routing Distribution for {activeTenant.name}
             </h3>
           </div>
-          <span className="text-xs text-slate-400">Total Queries Dispatched</span>
+          <span className="text-xs text-slate-400">Total Queries Dispatched: {metrics?.total_requests || 0}</span>
         </div>
 
         <div className="h-48 pt-2">
@@ -142,7 +204,7 @@ export default function AdminPage() {
             </ResponsiveContainer>
           ) : (
             <div className="h-full flex items-center justify-center text-xs text-slate-400">
-              No query distribution data recorded yet.
+              No query distribution data recorded for {activeTenant.name} yet.
             </div>
           )}
         </div>
@@ -156,7 +218,7 @@ export default function AdminPage() {
               <FileText size={14} />
             </div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Escalation Support Queue
+              Escalation Support Queue ({activeTenant.name})
             </h3>
           </div>
           <span className="text-xs text-slate-400">
@@ -201,7 +263,7 @@ export default function AdminPage() {
               {escalations.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
-                    No active escalations. All multi-agent queries resolved successfully.
+                    No active escalations for this college. All multi-agent queries resolved successfully.
                   </td>
                 </tr>
               )}

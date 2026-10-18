@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 from app.agents.base import BaseAgent
 from app.schemas import AgentResult
 from app.rag.retriever import retrieve
@@ -15,8 +15,8 @@ class AcademicAgent(BaseAgent):
             self.system_prompt = f.read()
         self.tools = registry.get_tools_for_agent(["deadline_lookup"])
         
-    async def run(self, query: str, memory: Any = None) -> AgentResult:
-        rag_results = retrieve("academics", query)
+    async def run(self, query: str, memory: Any = None, tenant_id: str = "apex_university", tenant_config: Optional[dict] = None) -> AgentResult:
+        rag_results = retrieve("academics", query, tenant_id=tenant_id)
         
         context = ""
         sources = []
@@ -24,8 +24,13 @@ class AcademicAgent(BaseAgent):
             context = "\n".join([f"[{c['source_file']}] {c['text']}" for c in rag_results])
             sources = list(set([c['source_file'] for c in rag_results]))
             
-        return await self._call_llm(query, context, sources, tool_calls=[])
+        custom_prompt = self.system_prompt
+        if tenant_config and "name" in tenant_config:
+            custom_prompt = f"You are the Academic Advisor for {tenant_config['name']}.\n" + custom_prompt
+
+        return await self._call_llm(query, context, sources, tool_calls=[], custom_prompt=custom_prompt)
         
-    async def _call_llm(self, query: str, context: str, sources: List[str], tool_calls: List[dict]) -> AgentResult:
+    async def _call_llm(self, query: str, context: str, sources: List[str], tool_calls: List[dict], custom_prompt: Optional[str] = None) -> AgentResult:
         from app.llm import call_agent_llm
-        return await call_agent_llm(self.name, self.system_prompt, query, context, sources, tool_calls)
+        prompt = custom_prompt or self.system_prompt
+        return await call_agent_llm(self.name, prompt, query, context, sources, tool_calls)

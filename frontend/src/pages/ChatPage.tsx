@@ -9,14 +9,18 @@ import {
   Mic, 
   ShieldCheck, 
   GraduationCap, 
-  MessageSquare,
-  ThumbsUp,
-  ThumbsDown,
-  Bot
+  MessageSquare, 
+  ThumbsUp, 
+  ThumbsDown, 
+  Bot, 
+  Building, 
+  Code
 } from 'lucide-react';
-import type { TraceEvent } from '../api/client';
+import type { TraceEvent, Tenant } from '../api/client';
+import { api } from '../api/client';
 import { AgentFlowchart } from '../components/AgentFlowchart';
 import type { FlowchartState } from '../components/AgentFlowchart';
+import { EmbedModal } from '../components/EmbedModal';
 
 const API_URL = 'http://localhost:8000';
 
@@ -53,16 +57,45 @@ const INITIAL_FLOWCHART: FlowchartState = {
 };
 
 export default function ChatPage() {
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>('apex_university');
+  const [showEmbedModal, setShowEmbedModal] = useState<boolean>(false);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [session] = useState(`sess-${Math.random().toString(36).substr(2, 6)}`);
+  const [session, setSession] = useState(`sess-${Math.random().toString(36).substr(2, 6)}`);
   const [activeFlowchart, setActiveFlowchart] = useState<FlowchartState>(INITIAL_FLOWCHART);
   const [expandedTraceId, setExpandedTraceId] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
+  // Load tenants on mount
+  useEffect(() => {
+    api.getTenants().then(res => {
+      if (res && res.tenants && res.tenants.length) {
+        setTenants(res.tenants);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const activeTenant = tenants.find(t => t.tenant_id === selectedTenantId) || {
+    tenant_id: 'apex_university',
+    name: 'Apex Institute of Technology',
+    slug: 'apex',
+    theme_color: '#4f46e5',
+    domain_whitelist: [],
+    active_advisors: {}
+  };
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activeFlowchart]);
+
+  const handleTenantChange = (newTenantId: string) => {
+    setSelectedTenantId(newTenantId);
+    setSession(`sess-${Math.random().toString(36).substr(2, 6)}`);
+    setMessages([]);
+    setActiveFlowchart(INITIAL_FLOWCHART);
+  };
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
@@ -110,7 +143,7 @@ export default function ChatPage() {
       }
     ]);
 
-    const es = new EventSource(`${API_URL}/chat/stream?session_id=${session}&message=${encodeURIComponent(text)}`);
+    const es = new EventSource(`${API_URL}/chat/stream?session_id=${session}&message=${encodeURIComponent(text)}&tenant_id=${encodeURIComponent(selectedTenantId)}`);
 
     let finalAnswer = '';
     let activeAgents: string[] = [];
@@ -242,22 +275,60 @@ export default function ChatPage() {
 
   return (
     <div className="flex-1 flex flex-col relative min-h-0">
+      {/* Multi-Tenant Playground Control Bar */}
+      <div className="bg-white border-b border-slate-200/60 px-4 sm:px-6 py-2.5 shrink-0">
+        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-500 uppercase tracking-wider text-[11px] flex items-center gap-1">
+              <Building size={13} className="text-indigo-600" />
+              Active Institution Playground:
+            </span>
+            <select
+              value={selectedTenantId}
+              onChange={(e) => handleTenantChange(e.target.value)}
+              className="bg-slate-50 border border-slate-200 text-slate-800 font-semibold rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer text-xs"
+            >
+              {tenants.map(t => (
+                <option key={t.tenant_id} value={t.tenant_id}>
+                  {t.name} ({t.slug})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowEmbedModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold border border-indigo-200/60 shadow-2xs transition-colors cursor-pointer"
+            >
+              <Code size={13} />
+              <span>Get Embed Snippet</span>
+            </button>
+            <span className="text-[11px] text-slate-400 hidden sm:inline">
+              Session: <code className="font-mono text-slate-500">{session}</code>
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* Scrollable Chat Area */}
       <div className="flex-1 overflow-y-auto">
-        <main className="max-w-4xl mx-auto w-full px-4 sm:px-6 pt-8 pb-40 space-y-7">
+        <main className="max-w-4xl mx-auto w-full px-4 sm:px-6 pt-6 pb-40 space-y-6">
           {/* Connected Advisors Card (Ambient Routing) */}
           <AgentFlowchart state={activeFlowchart} />
 
           {/* Empty State when no messages */}
           {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center text-center py-12 px-4 space-y-5">
+            <div className="flex flex-col items-center justify-center text-center py-10 px-4 space-y-4">
               <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center shadow-xs">
                 <Bot size={24} />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-slate-900 tracking-tight">How can I assist your college operations today?</h3>
+                <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                  {activeTenant.name} Assistant Sandbox
+                </h3>
                 <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                  Ask questions across academics, placements, events, and campus facilities. Queries are routed directly to specialized campus advisors.
+                  Test questions across academics, placements, events, and campus facilities. Queries are isolated to {activeTenant.name} handbooks.
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-xl w-full pt-2">
@@ -309,7 +380,7 @@ export default function ChatPage() {
                         <div className="flex items-center gap-2 text-xs font-medium text-indigo-700">
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-100">
                             <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
-                            Verified Campus Policy
+                            Verified Policy • {activeTenant.name}
                           </span>
                           <span className="text-slate-400">• Fall 2024 / 2025</span>
                           {m.agents && m.agents.length > 0 && (
@@ -337,7 +408,7 @@ export default function ChatPage() {
                               Support Notification {m.ticket_id ? `(Ticket ${m.ticket_id})` : ''}
                             </h3>
                             <p className="text-xs sm:text-[13px] text-amber-800 leading-relaxed">
-                              A portion of this query requires manual administrator review. An automated support request has been logged.
+                              A portion of this query requires manual review by {activeTenant.name} staff. An automated support request has been logged.
                             </p>
                           </div>
                         </div>
@@ -401,7 +472,7 @@ export default function ChatPage() {
                       <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
                         <div className="flex flex-wrap items-center gap-2.5">
                           <button
-                            onClick={() => sendMessage("Can you assist me with filing an official form for this?")}
+                            onClick={() => sendMessage("Can you assist me with filing an official request for this?")}
                             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
                           >
                             <GraduationCap className="w-4 h-4" />
@@ -434,7 +505,7 @@ export default function ChatPage() {
         </main>
       </div>
 
-      {/* Solid White Pinned Floating Input Dock with Top Border Separation */}
+      {/* Solid White Pinned Floating Input Dock */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-slate-200/80 shadow-[0_-4px_20px_rgba(0,0,0,0.04)] py-4 px-4">
         <div className="max-w-3xl mx-auto space-y-2">
           {/* Input Box */}
@@ -450,7 +521,7 @@ export default function ChatPage() {
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && sendMessage(input)}
               className="w-full bg-transparent border-0 focus:ring-0 focus:outline-none text-slate-800 text-[14px] placeholder:text-slate-400 px-1 py-1"
-              placeholder="Ask anything about courses, exams, hostel policies, placement rules..."
+              placeholder={`Ask ${activeTenant.name} about policies, exams, placement rules...`}
               type="text"
             />
             <button
@@ -483,6 +554,15 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* Embed Code Modal */}
+      <EmbedModal
+        tenantId={activeTenant.tenant_id}
+        tenantName={activeTenant.name}
+        themeColor={activeTenant.theme_color || '#4f46e5'}
+        isOpen={showEmbedModal}
+        onClose={() => setShowEmbedModal(false)}
+      />
     </div>
   );
 }

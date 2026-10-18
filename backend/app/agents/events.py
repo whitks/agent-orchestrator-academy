@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 from app.agents.base import BaseAgent
 from app.schemas import AgentResult
 from app.tools import registry
@@ -12,18 +12,20 @@ class EventsAgent(BaseAgent):
         self.name = "EventsAgent"
         with open(PROMPT_PATH, "r", encoding="utf-8") as f:
             self.system_prompt = f.read()
-        # Mainly relies on tool calling, no RAG needed
         self.tools = registry.get_tools_for_agent(["event_lookup"])
         
-    async def run(self, query: str, memory: Any = None) -> AgentResult:
-        # Simulate an LLM electing to call the tool
+    async def run(self, query: str, memory: Any = None, tenant_id: str = "apex_university", tenant_config: Optional[dict] = None) -> AgentResult:
         tool = self.tools[0]
-        tool_res, trace = tool.run(self.name, {}) # Empty kwargs searches all
+        tool_res, trace = tool.run(self.name, {})
         
         context = f"Events Tool Output: {tool_res.data}"
+        custom_prompt = self.system_prompt
+        if tenant_config and "name" in tenant_config:
+            custom_prompt = f"You are the Student Activities Advisor for {tenant_config['name']}.\n" + custom_prompt
+            
+        return await self._call_llm(query, context, sources=["events.json"], tool_calls=[trace.model_dump()], custom_prompt=custom_prompt)
         
-        return await self._call_llm(query, context, sources=["events.json"], tool_calls=[trace.model_dump()])
-        
-    async def _call_llm(self, query: str, context: str, sources: List[str], tool_calls: List[dict]) -> AgentResult:
+    async def _call_llm(self, query: str, context: str, sources: List[str], tool_calls: List[dict], custom_prompt: Optional[str] = None) -> AgentResult:
         from app.llm import call_agent_llm
-        return await call_agent_llm(self.name, self.system_prompt, query, context, sources, tool_calls)
+        prompt = custom_prompt or self.system_prompt
+        return await call_agent_llm(self.name, prompt, query, context, sources, tool_calls)

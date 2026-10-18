@@ -25,9 +25,10 @@ logger.addHandler(handler)
 logger.propagate = False
 
 class Tracer:
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, tenant_id: str = "apex_university"):
         self.request_id = str(uuid.uuid4())
         self.session_id = session_id
+        self.tenant_id = tenant_id
         self.traces: List[TraceEvent] = []
         self.start_time = time.time()
         self.route_domains = []
@@ -36,14 +37,16 @@ class Tracer:
 
     def add_trace(self, trace: TraceEvent):
         trace.request_id = self.request_id
+        trace.tenant_id = self.tenant_id
         self.traces.append(trace)
         save_trace(trace.model_dump())
-        logger.info(f"Trace recorded: {trace.step} ({trace.agent})", extra={"trace_event": trace.model_dump()})
+        logger.info(f"Trace recorded: {trace.step} ({trace.agent}) [{self.tenant_id}]", extra={"trace_event": trace.model_dump()})
 
     def close(self):
         total_latency = (time.time() - self.start_time) * 1000
         metrics = {
             "request_id": self.request_id,
+            "tenant_id": self.tenant_id,
             "session_id": self.session_id,
             "escalated": self.escalated,
             "fallback_triggered": self.fallback_triggered,
@@ -51,4 +54,4 @@ class Tracer:
             "total_latency": total_latency
         }
         save_request_metrics(metrics)
-        logger.info(f"Request {self.request_id} completed", extra={"trace_event": metrics})
+        logger.info(f"Request {self.request_id} completed [{self.tenant_id}]", extra={"trace_event": metrics})

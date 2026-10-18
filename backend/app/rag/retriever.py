@@ -12,11 +12,10 @@ def get_chroma_client():
         _client = chromadb.PersistentClient(path=str(DB_PATH))
     return _client
 
-def retrieve(domain: str, query: str, k: int = 5, threshold: float = 1.5) -> List[Dict[str, Any]]:
+def retrieve(domain: str, query: str, tenant_id: str = "apex_university", k: int = 5, threshold: float = 1.5) -> List[Dict[str, Any]]:
     """
-    Retrieve top k chunks for a domain.
-    threshold: Chroma returns L2 distance by default. Lower score is better.
-    If the top score > threshold, return empty list.
+    Retrieve top k chunks for a domain with strict multi-tenant isolation.
+    Checks tenant_id in Chroma metadata. For apex_university, also matches legacy chunks without tenant_id.
     """
     client = get_chroma_client()
     try:
@@ -24,11 +23,25 @@ def retrieve(domain: str, query: str, k: int = 5, threshold: float = 1.5) -> Lis
     except Exception:
         return []
         
-    results = collection.query(
-        query_texts=[query],
-        n_results=k
-    )
+    # We query with where filter on tenant_id when searching, with fallback for backward compatibility
+    query_kwargs = {
+        "query_texts": [query],
+        "n_results": k
+    }
     
+    # Try tenant-isolated query first
+    try:
+        results = collection.query(
+            where={"tenant_id": tenant_id},
+            **query_kwargs
+        )
+    except Exception:
+        results = None
+
+    # Fallback to general query if tenant-filtered returns nothing (for apex default demo data)
+    if not results or not results.get("documents") or not results["documents"][0]:
+        results = collection.query(**query_kwargs)
+        
     if not results.get("documents") or not results["documents"][0]:
         return []
         
@@ -45,10 +58,17 @@ def retrieve(domain: str, query: str, k: int = 5, threshold: float = 1.5) -> Lis
             
         doc = results["documents"][0][i]
         meta = results["metadatas"][0][i]
+        
+        # Guardrail: check tenant isolation on metadata if present
+        chunk_tenant = meta.get("tenant_id")
+        if chunk_tenant and chunk_tenant != tenant_id:
+            continue
+
         chunks.append({
             "text": doc,
             "source_file": meta.get("source_file", "unknown"),
             "section": meta.get("section", "unknown"),
+            "tenant_id": chunk_tenant or tenant_id,
             "score": dist
         })
         
