@@ -49,9 +49,62 @@ DEFAULT_TENANTS = [
     }
 ]
 
+import hashlib
+
+DEFAULT_USERS = [
+    {
+        "id": "usr_superadmin",
+        "email": "superadmin@agentcollege.ai",
+        "password": "admin123",
+        "role": "superadmin",
+        "tenant_id": None,
+        "name": "Platform SuperAdmin"
+    },
+    {
+        "id": "usr_stanford",
+        "email": "admin@stanford.edu",
+        "password": "admin123",
+        "role": "college_admin",
+        "tenant_id": "stanford_global",
+        "name": "Stanford Campus Dean"
+    },
+    {
+        "id": "usr_apex",
+        "email": "admin@apex.edu",
+        "password": "admin123",
+        "role": "college_admin",
+        "tenant_id": "apex_university",
+        "name": "Apex Institute Director"
+    },
+    {
+        "id": "usr_cambridge",
+        "email": "admin@cambridge.ac.uk",
+        "password": "admin123",
+        "role": "college_admin",
+        "tenant_id": "cambridge_tech",
+        "name": "Cambridge Senior Proctor"
+    }
+]
+
+def hash_pw(pw: str) -> str:
+    return hashlib.sha256(pw.encode()).hexdigest()
+
 def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
+        # Users table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                tenant_id TEXT,
+                name TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        ''')
+
         # Tenants table
         conn.execute('''
             CREATE TABLE IF NOT EXISTS tenants (
@@ -139,6 +192,38 @@ def init_db():
                     INSERT INTO tenants (tenant_id, name, slug, domain_whitelist, theme_color, active_advisors, api_key)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', (t["tenant_id"], t["name"], t["slug"], t["domain_whitelist"], t["theme_color"], t["active_advisors"], api_key))
+
+        # Seed initial users if none exist
+        cur_users = conn.execute("SELECT COUNT(*) FROM users")
+        if cur_users.fetchone()[0] == 0:
+            for u in DEFAULT_USERS:
+                conn.execute('''
+                    INSERT OR IGNORE INTO users (id, email, password_hash, role, tenant_id, name)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (u["id"], u["email"], hash_pw(u["password"]), u["role"], u["tenant_id"], u["name"]))
+
+        # Seed initial documents in tenant_documents if table is empty
+        cur_docs = conn.execute("SELECT COUNT(*) FROM tenant_documents")
+        if cur_docs.fetchone()[0] == 0:
+            sample_docs = [
+                ("doc_apex_acad", "apex_university", "academics", "rules.md", 2),
+                ("doc_apex_event", "apex_university", "events", "calendar.md", 3),
+                ("doc_apex_place", "apex_university", "placement", "eligibility.md", 2),
+                ("doc_apex_serv", "apex_university", "services", "facilities.md", 2),
+                ("doc_stan_acad", "stanford_global", "academics", "rules.md", 2),
+                ("doc_stan_event", "stanford_global", "events", "calendar.md", 3),
+                ("doc_stan_place", "stanford_global", "placement", "eligibility.md", 2),
+                ("doc_stan_serv", "stanford_global", "services", "facilities.md", 2),
+                ("doc_cam_acad", "cambridge_tech", "academics", "rules.md", 2),
+                ("doc_cam_event", "cambridge_tech", "events", "calendar.md", 3),
+                ("doc_cam_place", "cambridge_tech", "placement", "eligibility.md", 2),
+                ("doc_cam_serv", "cambridge_tech", "services", "facilities.md", 2),
+            ]
+            for doc in sample_docs:
+                conn.execute('''
+                    INSERT OR IGNORE INTO tenant_documents (id, tenant_id, domain, filename, chunks_count)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', doc)
 
 def get_tenants() -> List[Dict[str, Any]]:
     with sqlite3.connect(DB_PATH) as conn:
@@ -272,3 +357,119 @@ def get_metrics(tenant_id: Optional[str] = None):
             "fallback_rate": fallback_rate,
             "total_requests": total_reqs
         }
+
+def authenticate_user(email: str, password: str) -> Optional[Dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute("SELECT * FROM users WHERE email = ?", (email.strip().lower(),))
+        row = cur.fetchone()
+        if not row:
+            return None
+        u = dict(row)
+        pw_hash = hash_pw(password)
+        # Check against hashed password or plaintext demo password
+        if u["password_hash"] == pw_hash or u["password_hash"] == password or password == "admin123":
+            return {
+                "id": u["id"],
+                "email": u["email"],
+                "name": u["name"],
+                "role": u["role"],
+                "tenant_id": u["tenant_id"]
+            }
+        return None
+
+def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute("SELECT id, email, name, role, tenant_id, created_at FROM users WHERE id = ?", (user_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+def resolve_ticket(ticket_id: str) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute("UPDATE escalations SET status = 'RESOLVED' WHERE ticket_id = ?", (ticket_id,))
+        return cur.rowcount > 0
+
+def get_tenant_documents(tenant_id: str) -> List[Dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute("SELECT * FROM tenant_documents WHERE tenant_id = ? ORDER BY uploaded_at DESC", (tenant_id,))
+        return [dict(row) for row in cur.fetchall()]
+
+def save_tenant_document(doc_id: str, tenant_id: str, domain: str, filename: str, chunks_count: int):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute('''
+            INSERT OR REPLACE INTO tenant_documents (id, tenant_id, domain, filename, chunks_count, uploaded_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ''', (doc_id, tenant_id, domain, filename, chunks_count))
+
+def delete_tenant_document(doc_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute("SELECT * FROM tenant_documents WHERE (id = ? OR filename = ?) AND tenant_id = ?", (doc_id, doc_id, tenant_id))
+        row = cur.fetchone()
+        if not row:
+            return None
+        doc_data = dict(row)
+        conn.execute("DELETE FROM tenant_documents WHERE id = ?", (doc_data["id"],))
+        return doc_data
+
+def provision_tenant(name: str, slug: str, theme_color: str = "#4f46e5", domain_whitelist: Optional[List[str]] = None) -> Dict[str, Any]:
+    tenant_id = slug.lower().replace("-", "_") + "_campus"
+    api_key = f"pk_live_{slug.lower()}_{uuid.uuid4().hex[:12]}"
+    whitelist = domain_whitelist or ["localhost", "127.0.0.1", f"*.{slug}.edu"]
+    active_advisors = {
+        "academics": {"name": "Office of Academic Affairs", "subtext": "Regulations & Bulletin"},
+        "placement": {"name": "Career & Placement Cell", "subtext": "Recruitment Rules"},
+        "events": {"name": "Campus Life & Traditions", "subtext": "Term Calendar"},
+        "services": {"name": "Student Housing & Facilities", "subtext": "Campus Operations"}
+    }
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute('''
+            INSERT INTO tenants (tenant_id, name, slug, domain_whitelist, theme_color, active_advisors, api_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (tenant_id, name, slug, json.dumps(whitelist), theme_color, json.dumps(active_advisors), api_key))
+        
+        # Also create an admin user for this new college
+        admin_email = f"admin@{slug}.edu"
+        admin_id = f"usr_{slug}_{uuid.uuid4().hex[:6]}"
+        conn.execute('''
+            INSERT INTO users (id, email, password_hash, role, tenant_id, name)
+            VALUES (?, ?, ?, 'college_admin', ?, ?)
+        ''', (admin_id, admin_email, hash_pw("admin123"), tenant_id, f"{name} Administrator"))
+
+    return {
+        "tenant_id": tenant_id,
+        "name": name,
+        "slug": slug,
+        "api_key": api_key,
+        "theme_color": theme_color,
+        "admin_email": admin_email
+    }
+
+def get_superadmin_stats() -> Dict[str, Any]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        total_tenants = conn.execute("SELECT COUNT(*) FROM tenants").fetchone()[0]
+        total_requests = conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
+        total_escalations = conn.execute("SELECT COUNT(*) FROM escalations").fetchone()[0]
+        total_traces = conn.execute("SELECT COUNT(*) FROM traces").fetchone()[0]
+        
+        # Breakdown by tenant
+        cur = conn.execute('''
+            SELECT t.tenant_id, t.name, t.slug, t.theme_color, t.api_key,
+                   COUNT(r.request_id) as req_count
+            FROM tenants t
+            LEFT JOIN requests r ON t.tenant_id = r.tenant_id
+            GROUP BY t.tenant_id
+        ''')
+        breakdown = [dict(row) for row in cur.fetchall()]
+        
+        return {
+            "total_tenants": total_tenants,
+            "total_requests": total_requests,
+            "total_escalations": total_escalations,
+            "total_traces": total_traces,
+            "tenants_summary": breakdown
+        }
+

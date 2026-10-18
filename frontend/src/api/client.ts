@@ -36,6 +36,23 @@ export interface Tenant {
   api_key?: string;
 }
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string;
+  role: 'student' | 'college_admin' | 'superadmin';
+  tenant_id?: string | null;
+}
+
+export interface TenantDocument {
+  id: string;
+  tenant_id: string;
+  domain: string;
+  filename: string;
+  chunks_count: number;
+  uploaded_at: string;
+}
+
 export const api = {
   getTenants: async (): Promise<{ tenants: Tenant[] }> => {
     const res = await fetch(`${API_URL}/api/tenants`);
@@ -65,6 +82,88 @@ export const api = {
   
   clearSession: async (sessionId: string) => {
     const res = await fetch(`${API_URL}/session/${sessionId}`, { method: 'DELETE' });
+    return res.json();
+  },
+
+  // Auth
+  login: async (payload: { email?: string; password?: string; role?: string; tenant_id?: string }): Promise<{ token: string; user: UserProfile }> => {
+    const res = await fetch(`${API_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Authentication failed");
+    }
+    return res.json();
+  },
+
+  // Documents / Knowledge Base
+  getDocuments: async (tenantId: string): Promise<{ documents: TenantDocument[] }> => {
+    const res = await fetch(`${API_URL}/api/admin/documents?tenant_id=${tenantId}`);
+    if (!res.ok) throw new Error("Failed to load documents");
+    return res.json();
+  },
+
+  uploadDocument: async (tenantId: string, domain: string, filename: string, content: string) => {
+    const res = await fetch(`${API_URL}/api/admin/documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_id: tenantId, domain, filename, content })
+    });
+    if (!res.ok) throw new Error("Failed to index document");
+    return res.json();
+  },
+
+  deleteDocument: async (docId: string, tenantId: string) => {
+    const res = await fetch(`${API_URL}/api/admin/documents/${docId}?tenant_id=${tenantId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error("Failed to delete document");
+    return res.json();
+  },
+
+  // Operational Rules (Events & Deadlines)
+  getRules: async (tenantId: string) => {
+    const res = await fetch(`${API_URL}/api/admin/rules?tenant_id=${tenantId}`);
+    if (!res.ok) throw new Error("Failed to load rules");
+    return res.json();
+  },
+
+  saveRules: async (tenantId: string, ruleType: 'events' | 'deadlines', data: any) => {
+    const res = await fetch(`${API_URL}/api/admin/rules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_id: tenantId, rule_type: ruleType, data })
+    });
+    if (!res.ok) throw new Error("Failed to save rules");
+    return res.json();
+  },
+
+  // Ticket Resolution
+  resolveTicket: async (ticketId: string) => {
+    const res = await fetch(`${API_URL}/api/admin/tickets/${ticketId}/resolve`, {
+      method: 'POST'
+    });
+    if (!res.ok) throw new Error("Failed to resolve ticket");
+    return res.json();
+  },
+
+  // SuperAdmin
+  getSuperadminStats: async () => {
+    const res = await fetch(`${API_URL}/api/superadmin/stats`);
+    if (!res.ok) throw new Error("Failed to fetch superadmin stats");
+    return res.json();
+  },
+
+  provisionTenant: async (payload: { name: string; slug: string; theme_color?: string; domain_whitelist?: string[] }) => {
+    const res = await fetch(`${API_URL}/api/superadmin/tenants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error("Failed to provision tenant");
     return res.json();
   }
 };

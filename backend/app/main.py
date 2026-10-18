@@ -21,7 +21,14 @@ from app.db import (
     get_metrics, 
     get_tenants, 
     get_tenant, 
-    get_tenant_by_api_key
+    get_tenant_by_api_key,
+    authenticate_user,
+    resolve_ticket,
+    get_tenant_documents,
+    save_tenant_document,
+    delete_tenant_document,
+    provision_tenant,
+    get_superadmin_stats
 )
 
 limiter = Limiter(key_func=get_remote_address)
@@ -147,3 +154,249 @@ async def fetch_traces(request_id: str):
 @app.get("/metrics")
 async def fetch_metrics(tenant_id: Optional[str] = None):
     return get_metrics(tenant_id)
+
+# --- Authentication Endpoints ---
+
+@app.post("/api/auth/login")
+async def login(payload: dict):
+    email = payload.get("email", "")
+    password = payload.get("password", "")
+    role = payload.get("role")
+    tenant_id = payload.get("tenant_id")
+
+    # Quick demo switch option
+    if role:
+        if role == "superadmin":
+            user = {
+                "id": "usr_superadmin",
+                "email": "superadmin@agentcollege.ai",
+                "name": "Platform SuperAdmin",
+                "role": "superadmin",
+                "tenant_id": None
+            }
+        else:
+            t_id = tenant_id or "apex_university"
+            tenant_info = get_tenant(t_id) or {"name": "College Admin"}
+            user = {
+                "id": f"usr_{t_id}",
+                "email": f"admin@{t_id.split('_')[0]}.edu",
+                "name": f"{tenant_info.get('name', 'College')} Admin",
+                "role": "college_admin",
+                "tenant_id": t_id
+            }
+        return {
+            "token": f"jwt_mock_{user['id']}_{user['role']}",
+            "user": user
+        }
+
+    # Standard credential authentication
+    user = authenticate_user(email, password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid institutional email or password")
+    
+    return {
+        "token": f"jwt_mock_{user['id']}_{user['role']}",
+        "user": user
+    }
+
+@app.get("/api/auth/me")
+async def get_me(authorization: Optional[str] = Header(None)):
+    if not authorization:
+        # Default public student user
+        return {
+            "user": {
+                "id": "usr_student_public",
+                "email": "student@campus.edu",
+                "name": "krish sharma",
+                "role": "student",
+                "tenant_id": "apex_university"
+            }
+        }
+    return {
+        "user": {
+            "id": "usr_active",
+            "role": "college_admin",
+            "name": "Campus Administrator"
+        }
+    }
+
+# --- Document & Knowledge Base Management ---
+
+@app.get("/api/admin/documents")
+async def list_documents(tenant_id: str):
+    docs = get_tenant_documents(tenant_id)
+    return {"documents": docs, "tenant_id": tenant_id}
+
+@app.post("/api/admin/documents")
+async def upload_document(payload: dict):
+    tenant_id = payload.get("tenant_id", "apex_university")
+    domain = payload.get("domain", "academics")
+    filename = payload.get("filename", "policy.md")
+    content = payload.get("content", "")
+    
+    if not filename.endswith((".md", ".txt")):
+        filename = f"{filename}.md"
+        
+    doc_id = f"doc_{tenant_id}_{domain}_{uuid.uuid4().hex[:6]}"
+    
+    # 1. Save to tenant directory
+    target_dir = Path("../data/tenants") / tenant_id / domain
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_file = target_dir / filename
+    with open(target_file, "w", encoding="utf-8") as f:
+        f.write(content)
+        
+    # 2. Chunk and upsert into Chroma collection
+    from app.rag.ingest import chunk_text, get_chroma_client
+    chunks = chunk_text(content, filename)
+    chunk_count = len(chunks)
+    
+    if chunks:
+        client = get_chroma_client()
+        col = client.get_or_create_collection(name=domain)
+        ids = [f"{tenant_id}_{domain}_{filename}_{i}" for i in range(len(chunks))]
+        docs = [c["text"] for c in chunks]
+        metas = [{**c["metadata"], "tenant_id": tenant_id, "domain": domain, "document_id": doc_id} for c in chunks]
+        col.upsert(documents=docs, metadatas=metas, ids=ids)
+        
+    # 3. Save relational document record in SQLite
+    save_tenant_document(doc_id, tenant_id, domain, filename, chunk_count)
+    
+    return {
+        "success": True,
+        "document_id": doc_id,
+        "filename": filename,
+        "chunks_indexed": chunk_count,
+        "message": f"Successfully indexed {chunk_count} chunk(s) into '{domain}' for {tenant_id}."
+    }
+
+@app.delete("/api/admin/documents/{doc_id}")
+async def delete_document(doc_id: str, tenant_id: str):
+    doc = delete_tenant_document(doc_id, tenant_id)
+    domain = doc.get("domain") if doc else None
+    filename = doc.get("filename") if doc else None
+    
+    # Purge vectors from Chroma collection
+    purged_count = 0
+    if domain:
+        try:
+            from app.rag.ingest import get_chroma_client
+            client = get_chroma_client()
+            col = client.get_collection(name=domain)
+            # Find and delete chunks
+            res = col.get(where={"tenant_id": tenant_id})
+            ids_to_delete = []
+            if res and res.get("ids") and res.get("metadatas"):
+                for idx, meta in enumerate(res["metadatas"]):
+                    if meta.get("source_file") == filename or meta.get("document_id") == doc_id:
+                        ids_to_delete.append(res["ids"][idx])
+            if ids_to_delete:
+                col.delete(ids=ids_to_delete)
+                purged_count = len(ids_to_delete)
+        except Exception as e:
+            print(f"[CHROMA PURGE WARNING] {e}")
+            
+    # Remove file from disk
+    if domain and filename:
+        file_on_disk = Path("../data/tenants") / tenant_id / domain / filename
+        if file_on_disk.exists():
+            file_on_disk.unlink()
+            
+    return {
+        "success": True,
+        "document_id": doc_id,
+        "purged_vectors": purged_count,
+        "message": f"Document {doc_id} and {purged_count} vectors permanently purged."
+    }
+
+# --- Operational Rules Editor (Events & Deadlines) ---
+
+@app.get("/api/admin/rules")
+async def get_rules(tenant_id: str):
+    events_file = Path("../data/tenants") / tenant_id / "mock" / "events.json"
+    deadlines_file = Path("../data/tenants") / tenant_id / "mock" / "deadlines.json"
+    
+    events_data = {}
+    deadlines_data = {}
+    if events_file.exists():
+        with open(events_file, "r", encoding="utf-8") as f:
+            events_data = json.load(f)
+    if deadlines_file.exists():
+        with open(deadlines_file, "r", encoding="utf-8") as f:
+            deadlines_data = json.load(f)
+            
+    return {
+        "tenant_id": tenant_id,
+        "events": events_data.get("events", []),
+        "deadlines": deadlines_data.get("deadlines", {})
+    }
+
+@app.post("/api/admin/rules")
+async def update_rules(payload: dict):
+    tenant_id = payload.get("tenant_id", "apex_university")
+    rule_type = payload.get("rule_type", "events") # 'events' | 'deadlines'
+    data = payload.get("data", {})
+    
+    mock_dir = Path("../data/tenants") / tenant_id / "mock"
+    mock_dir.mkdir(parents=True, exist_ok=True)
+    
+    if rule_type == "events":
+        target = mock_dir / "events.json"
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump({"events": data.get("events", [])}, f, indent=4)
+    elif rule_type == "deadlines":
+        target = mock_dir / "deadlines.json"
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump({"deadlines": data.get("deadlines", {})}, f, indent=4)
+            
+    return {"success": True, "tenant_id": tenant_id, "rule_type": rule_type}
+
+# --- Ticket Escalation Resolution ---
+
+@app.post("/api/admin/tickets/{ticket_id}/resolve")
+async def mark_ticket_resolved(ticket_id: str):
+    ok = resolve_ticket(ticket_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return {"success": True, "ticket_id": ticket_id, "status": "RESOLVED"}
+
+# --- Platform SuperAdmin Management ---
+
+@app.get("/api/superadmin/stats")
+async def superadmin_stats():
+    return get_superadmin_stats()
+
+@app.post("/api/superadmin/tenants")
+async def create_college_tenant(payload: dict):
+    name = payload.get("name")
+    slug = payload.get("slug")
+    theme_color = payload.get("theme_color", "#4f46e5")
+    whitelist = payload.get("domain_whitelist", [])
+    if not name or not slug:
+        raise HTTPException(status_code=400, detail="Name and slug are required")
+        
+    created = provision_tenant(name, slug, theme_color, whitelist)
+    
+    # Initialize basic starter handbook for new college
+    t_id = created["tenant_id"]
+    from app.rag.ingest import chunk_text, get_chroma_client
+    starter_dir = Path("../data/tenants") / t_id / "academics"
+    starter_dir.mkdir(parents=True, exist_ok=True)
+    starter_file = starter_dir / "rules.md"
+    starter_text = f"# {name} Regulations\n\n## Attendance Policy\nMinimum 75% attendance is required in all registered courses.\n"
+    with open(starter_file, "w", encoding="utf-8") as f:
+        f.write(starter_text)
+    save_tenant_document(f"doc_{t_id}_rules", t_id, "academics", "rules.md", 1)
+    
+    # Ingest into Chroma
+    chunks = chunk_text(starter_text, "rules.md")
+    client = get_chroma_client()
+    col = client.get_or_create_collection(name="academics")
+    col.upsert(
+        documents=[c["text"] for c in chunks],
+        metadatas=[{**c["metadata"], "tenant_id": t_id, "domain": "academics"} for c in chunks],
+        ids=[f"{t_id}_academics_rules_0"]
+    )
+    
+    return {"success": True, "tenant": created}
+
