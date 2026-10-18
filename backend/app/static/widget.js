@@ -260,10 +260,10 @@
       </div>
 
       <div class="advisors-pill-bar" id="advisors-bar">
-        <span class="advisor-chip">📚 Academics</span>
-        <span class="advisor-chip">💼 Placements</span>
-        <span class="advisor-chip">🎯 Activities</span>
-        <span class="advisor-chip">🏠 Facilities</span>
+        <span class="advisor-chip">Academics</span>
+        <span class="advisor-chip">Placements</span>
+        <span class="advisor-chip">Activities</span>
+        <span class="advisor-chip">Facilities</span>
       </div>
 
       <div class="chat-messages" id="messages">

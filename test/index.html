@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stanford Global Campus — Student Portal & Life</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Stanford Top Nav -->
+  <header class="stanford-top-bar">
+    <div class="stanford-brand">
+      <span class="stanford-logo-mark">Stanford University</span>
+      <span class="stanford-subtitle">Global Campus</span>
+    </div>
+    <nav class="nav-links">
+      <a href="#academics">Academics</a>
+      <a href="#campus-life">Campus Life</a>
+      <a href="#careers">BEAM Careers</a>
+      <a href="#housing">R&amp;DE Housing</a>
+    </nav>
+  </header>
+
+  <!-- Main Content -->
+  <main class="container">
+    <!-- Hero / Welcome Banner -->
+    <section class="hero-card">
+      <div class="hero-tag">Office of the Vice Provost for Student Affairs</div>
+      <h1 class="hero-title">Welcome to the Stanford Global Student Hub</h1>
+      <p class="hero-description">
+        Access official university bulletins, course registration deadlines, career advising, and campus traditions. 
+        Need immediate assistance? Click any quick question below or use the AI Assistant in the bottom right corner.
+      </p>
+
+      <!-- Quick Prompt Chips for Stanford Chatbot -->
+      <div class="chips-container">
+        <button class="chip-btn" onclick="askAdvisor('What is the Stanford cultural fest and when is it held?')">
+          <span>What is our cultural fest?</span>
+        </button>
+        <button class="chip-btn" onclick="askAdvisor('What is the attendance rule for seminars and labs?')">
+          <span>Attendance policy</span>
+        </button>
+        <button class="chip-btn" onclick="askAdvisor('Tell me about Stanford TreeHacks 2027')">
+          <span>TreeHacks Hackathon</span>
+        </button>
+        <button class="chip-btn" onclick="askAdvisor('What are the R&amp;DE undergraduate dorm curfew hours?')">
+          <span>Hostel curfew rules</span>
+        </button>
+        <button class="chip-btn" onclick="askAdvisor('What GPA is required for Stanford BEAM on-campus recruiting?')">
+          <span>Placement GPA cutoff</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Integration Verification Box -->
+    <div class="integration-box">
+      <h4>Chatbot Integration Active: Stanford Global Campus</h4>
+      <p>
+        This external webpage is running our standalone embeddable widget via:
+      </p>
+      <code>&lt;script src="http://localhost:8000/widget.js" data-tenant-id="stanford_global" data-theme-color="#8C1515"&gt;&lt;/script&gt;</code>
+      <p style="margin-top: 8px; font-size: 11.5px; color: #8C1515;">
+        All answers are strictly isolated to Stanford's knowledge base (Frost Music Festival, 80% attendance rule, TreeHacks, R&amp;DE housing).
+      </p>
+    </div>
+
+    <!-- Academic & Life Cards -->
+    <div class="portal-grid">
+      <div class="portal-card" id="academics">
+        <span class="card-badge">Registrar</span>
+        <h3 class="card-title">Academic Bulletin 2026-2027</h3>
+        <p class="card-desc">
+          Stanford operates on the 4.3 letter grade scale. 80% attendance in seminars/labs is required to maintain good academic standing.
+        </p>
+        <a href="javascript:void(0)" class="card-link" onclick="askAdvisor('What is the Stanford grading policy and passing GPA?')">
+          Ask Advisor about Grading &rarr;
+        </a>
+      </div>
+
+      <div class="portal-card" id="campus-life">
+        <span class="card-badge">Traditions &amp; Arts</span>
+        <h3 class="card-title">Frost Music &amp; Arts Festival</h3>
+        <p class="card-desc">
+          Stanford's premier cultural gathering hosted at the historic Frost Amphitheater, featuring headline indie artists, student bands, and art installations.
+        </p>
+        <a href="javascript:void(0)" class="card-link" onclick="askAdvisor('When is the Frost Music &amp; Arts Festival?')">
+          Ask Advisor about Frost Fest &rarr;
+        </a>
+      </div>
+
+      <div class="portal-card" id="careers">
+        <span class="card-badge">BEAM Career Center</span>
+        <h3 class="card-title">On-Campus Recruiting (OCI)</h3>
+        <p class="card-desc">
+          Cardinal Fall Career Fair and tech recruiting cycles. Minimum 3.2 cumulative GPA required for premier employer tracks via Handshake.
+        </p>
+        <a href="javascript:void(0)" class="card-link" onclick="askAdvisor('How do I register for Stanford BEAM career fair?')">
+          Ask Advisor about Placements &rarr;
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <!-- Client Interaction Script -->
+  <script src="script.js"></script>
+
+  <!-- Standalone Agent College Drop-In Chatbot for Stanford Global Campus -->
+  <script 
+    src="http://localhost:8000/widget.js" 
+    data-tenant-id="stanford_global"
+    data-api-url="http://localhost:8000"
+    data-theme-color="#8C1515"
+    defer>
+  </script>
+</body>
+</html>

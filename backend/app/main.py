@@ -57,6 +57,11 @@ WIDGET_DIR = Path(__file__).parent / "static"
 WIDGET_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(WIDGET_DIR)), name="static")
 
+# Mount test external site directory for one-click testing
+TEST_DIR = Path(__file__).resolve().parent.parent.parent / "test"
+if TEST_DIR.exists():
+    app.mount("/test", StaticFiles(directory=str(TEST_DIR), html=True), name="test")
+
 @app.on_event("startup")
 async def startup():
     init_db()
