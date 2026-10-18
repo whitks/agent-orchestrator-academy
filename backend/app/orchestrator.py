@@ -84,7 +84,7 @@ class Orchestrator:
         from app.llm import call_synthesizer
         return await call_synthesizer(valid_results, failed_results)
 
-    async def _run_agent_with_timeout(self, agent_name: str, query: str, memory_context: Dict[str, Any], timeout: float = 5.0) -> Tuple[Optional[AgentResult], TraceEvent]:
+    async def _run_agent_with_timeout(self, agent_name: str, query: str, memory_context: Dict[str, Any], timeout: float = 12.0) -> Tuple[Optional[AgentResult], TraceEvent]:
         agent = self.agents.get(agent_name)
         if not agent:
             raise ValueError(f"Agent {agent_name} not found")
@@ -180,7 +180,7 @@ class Orchestrator:
             tracer.add_trace(trace)
             if result:
                 agents_used.append(result.agent_name)
-                if result.status == "ok":
+                if result.status == "ok" or (result.status == "insufficient_evidence" and result.sources and result.confidence >= 0.5):
                     valid_results.append(result)
                 else:
                     failed_results.append(result)
@@ -225,32 +225,63 @@ class Orchestrator:
         return response
 
     async def stream_handle(self, session_id: str, message: str):
-        yield {"event": "progress", "step": "rewrite", "message": "Rewriting query..."}
+        tracer = Tracer(session_id)
+        start_time = time.time()
+        
+        yield {"event": "progress", "step": "rewrite", "message": "Analyzing & resolving conversational context..."}
         
         # 1. Query Rewrite
+        rewritten_query = message
         try:
-            rewritten_query = await self.memory.rewrite_query(session_id, message)
+            for attempt in range(self.max_retries + 1):
+                try:
+                    rewritten_query = await self.memory.rewrite_query(session_id, message)
+                    break
+                except Exception as e:
+                    await asyncio.sleep(0.3)
         except:
             rewritten_query = message
             
         memory_context = self.memory.get_context(session_id)
+        tracer.add_trace(TraceEvent(
+            timestamp=datetime.utcnow().isoformat(), step="QueryRewrite", agent="System",
+            input={"query": message}, output={"rewritten_query": rewritten_query}, latency_ms=(time.time() - start_time) * 1000, tokens_used=15
+        ))
         
-        yield {"event": "progress", "step": "routing", "message": f"Routing query: '{rewritten_query}'"}
+        yield {"event": "progress", "step": "routing", "message": f"Classifying query intent: '{rewritten_query}'"}
         
         # 2. Router Call
-        decision, _ = await self.route(rewritten_query, memory_context)
+        decision, route_trace = await self.route(rewritten_query, memory_context)
+        tracer.route_domains = decision.domains
+        tracer.add_trace(route_trace)
+        
+        yield {
+            "event": "router_decision",
+            "domains": decision.domains,
+            "reasoning": decision.reasoning,
+            "is_multi_domain": decision.is_multi_domain,
+            "confidence": decision.confidence
+        }
         
         if decision.confidence < 0.6:
-            yield {"event": "final_answer_tokens", "data": "I'm not completely sure what you mean. Could you clarify your question?"}
-            yield {"event": "done", "message": "Stream completed"}
+            tracer.fallback_triggered = True
+            tracer.close()
+            msg = "I'm not completely sure what you mean. Could you clarify your question?"
+            self.memory.add_turn(session_id, message, msg)
+            yield {"event": "final_answer_tokens", "data": msg}
+            yield {"event": "done", "message": "Stream completed", "agents": [], "sources": [], "escalated": False, "traces": [t.model_dump() for t in tracer.traces]}
             return
             
         if not decision.domains:
-            yield {"event": "final_answer_tokens", "data": "I cannot answer this query as it falls outside my supported domains."}
-            yield {"event": "done", "message": "Stream completed"}
+            tracer.fallback_triggered = True
+            tracer.close()
+            msg = "I cannot answer this query as it falls outside my supported domains."
+            self.memory.add_turn(session_id, message, msg)
+            yield {"event": "final_answer_tokens", "data": msg}
+            yield {"event": "done", "message": "Stream completed", "agents": [], "sources": [], "escalated": True, "traces": [t.model_dump() for t in tracer.traces]}
             return
             
-        yield {"event": "progress", "step": "execution", "message": f"Routing to agents: {decision.domains}"}
+        yield {"event": "progress", "step": "execution", "message": f"Dispatching query to domain agents: {', '.join(decision.domains)}"}
         
         # 3. Execution (Concurrent)
         tasks = [self._run_agent_with_timeout(d, rewritten_query, memory_context) for d in decision.domains if d in self.agents]
@@ -258,23 +289,56 @@ class Orchestrator:
         
         valid_results = []
         failed_results = []
-        for result, _ in agent_outputs:
+        agents_used = []
+        
+        for result, trace in agent_outputs:
+            tracer.add_trace(trace)
             if result:
-                if result.status == "ok":
+                agents_used.append(result.agent_name)
+                # Guardrail: If an agent answered part of the query with good confidence/sources or answered partially,
+                # count it as valid result so synthesizer can merge it!
+                if result.status == "ok" or (result.status == "insufficient_evidence" and result.sources and result.confidence >= 0.5):
                     valid_results.append(result)
                 else:
                     failed_results.append(result)
                     
+            yield {
+                "event": "agent_completed",
+                "agent_name": result.agent_name if result else "Unknown",
+                "status": result.status if result else "error",
+                "confidence": result.confidence if result else 0.0,
+                "sources": result.sources if result else [],
+                "answer_preview": (result.answer[:120] + "...") if result and len(result.answer) > 120 else (result.answer if result else "")
+            }
+                    
         if not valid_results and failed_results:
-            yield {"event": "final_answer_tokens", "data": "I couldn't find this in official college records. A support ticket has been opened."}
-            yield {"event": "done", "message": "Stream completed"}
+            ticket_id = create_ticket(session_id, rewritten_query)
+            tracer.escalated = True
+            tracer.fallback_triggered = True
+            tracer.close()
+            fallback_msg = "I couldn't find this in official college records. A support ticket has been opened."
+            self.memory.add_turn(session_id, message, fallback_msg)
+            yield {"event": "final_answer_tokens", "data": fallback_msg}
+            yield {"event": "done", "message": "Stream completed", "agents": agents_used, "sources": [], "escalated": True, "ticket_id": ticket_id, "traces": [t.model_dump() for t in tracer.traces]}
             return
             
-        yield {"event": "progress", "step": "synthesis", "message": "Synthesizing agent results..."}
+        yield {"event": "progress", "step": "synthesis", "message": "Synthesizing cohesive multi-domain response..."}
         
         # 4. Synthesizer Call
-        final_answer, _, _ = await self.synthesize(valid_results, failed_results)
+        final_answer, combined_sources, synth_trace = await self.synthesize(valid_results, failed_results)
+        tracer.add_trace(synth_trace)
+        tracer.escalated = len(failed_results) > 0 and len(valid_results) == 0
+        tracer.close()
         
-        # Simulate streaming tokens
+        self.memory.add_turn(session_id, message, final_answer)
+        
+        # Emit final answer
         yield {"event": "final_answer_tokens", "data": final_answer}
-        yield {"event": "done", "message": "Stream completed"}
+        yield {
+            "event": "done",
+            "message": "Stream completed",
+            "agents": agents_used,
+            "sources": combined_sources,
+            "escalated": tracer.escalated,
+            "traces": [t.model_dump() for t in tracer.traces]
+        }

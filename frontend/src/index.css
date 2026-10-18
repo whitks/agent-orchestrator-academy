@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-color: #111827;
-    --text-color: #f3f4f6;
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #FBFBFD;
+    color: #1e293b;
+    -webkit-font-smoothing: antialiased;
   }
+}
+
+::-webkit-scrollbar {
+  display: none;
 }

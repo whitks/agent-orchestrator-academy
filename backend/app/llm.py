@@ -43,24 +43,51 @@ async def call_router(query: str, memory_context: dict) -> RouteDecision:
     return RouteDecision(**result)
 
 async def call_synthesizer(valid_results: list, failed_results: list) -> tuple[str, list[str]]:
+    # Fallback default sources
+    combined_sources = []
+    for r in valid_results:
+        combined_sources.extend(getattr(r, "sources", []) or [])
+    combined_sources = list(dict.fromkeys(combined_sources)) # deduplicate preserve order
+
+    # If no valid results at all
+    if not valid_results:
+        return "I could not find information in the official records for your query.", []
+
     prompt = f"""
-    You are a synthesizer. Merge these valid answers into a single, cohesive response.
-    If there are failed domains, politely mention that you couldn't find information for them.
+    You are a synthesizer. Merge these valid answers into a single, cohesive, friendly response.
+    If there are failed domains, politely mention that information was unavailable for that part.
     
     Valid Results: {json.dumps([r.model_dump() for r in valid_results])}
     Failed Results: {json.dumps([r.model_dump() for r in failed_results])}
     
     Output ONLY valid JSON with 'final_answer' and a list of 'sources'.
+    Example:
+    {{
+        "final_answer": "...",
+        "sources": ["file.md"]
+    }}
     """
     
-    response = await client.chat.completions.create(
-        model=get_model(),
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"}
-    )
-    
-    result = json.loads(response.choices[0].message.content)
-    return result.get("final_answer", ""), result.get("sources", [])
+    try:
+        response = await client.chat.completions.create(
+            model=get_model(),
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        result = json.loads(response.choices[0].message.content)
+        final_answer = result.get("final_answer", "").strip()
+        sources = result.get("sources", [])
+        if not sources:
+            sources = combined_sources
+        if final_answer:
+            return final_answer, sources
+    except Exception as e:
+        print(f"[SYNTHESIZER LLM ERROR] {e}")
+
+    # Deterministic fallback guardrail: merge valid answers directly
+    fallback_parts = [r.answer for r in valid_results if r.answer]
+    fallback_text = "\n\n".join(fallback_parts)
+    return fallback_text, combined_sources
 
 async def call_query_rewrite(history: list, summary: str, query: str) -> str:
     prompt = f"""
@@ -89,10 +116,11 @@ async def call_agent_llm(agent_name: str, system_prompt: str, query: str, contex
     
     Respond ONLY with a valid JSON object matching this schema:
     {{
-        "answer": "<your final answer>",
+        "answer": "<your answer for the portion of the query covered by the context>",
         "status": "ok" or "insufficient_evidence",
         "confidence": 0.9
     }}
+    Important: If the query has multiple parts and you can answer the part relevant to your domain from the context, answer it and set status to "ok". Only set status to "insufficient_evidence" if your context has zero information for your domain.
     """
     
     response = await client.chat.completions.create(
