@@ -120,6 +120,16 @@ def init_db():
             )
         ''')
 
+        # Auto-migrate existing tables if missing tenant_id column
+        for table in ["traces", "requests", "escalations"]:
+            try:
+                cur = conn.execute(f"PRAGMA table_info({table})")
+                cols = [c[1] for c in cur.fetchall()]
+                if cols and "tenant_id" not in cols:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN tenant_id TEXT DEFAULT 'apex_university'")
+            except Exception as e:
+                print(f"[DB MIGRATION WARNING] Failed to migrate table {table}: {e}")
+
         # Seed initial tenants if none exist
         cursor = conn.execute("SELECT COUNT(*) FROM tenants")
         if cursor.fetchone()[0] == 0:
