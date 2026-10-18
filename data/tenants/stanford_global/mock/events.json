@@ -1,0 +1,7 @@
+{
+    "events": [
+        {"name": "Stanford TreeHacks 2027", "category": "technical", "date": "2027-02-19 to 2027-02-21", "location": "Huang Engineering Center & Arrillaga Center"},
+        {"name": "Frost Music & Arts Festival", "category": "cultural", "date": "2027-05-14 to 2027-05-16", "location": "Frost Amphitheater"},
+        {"name": "Gaieties & Big Game Week", "category": "traditions", "date": "2026-11-19 to 2026-11-21", "location": "Memorial Auditorium"}
+    ]
+}

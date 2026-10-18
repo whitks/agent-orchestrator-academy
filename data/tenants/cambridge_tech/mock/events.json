@@ -1,0 +1,7 @@
+{
+    "events": [
+        {"name": "Silicon Fen Innovation Summit", "category": "technical", "date": "2027-04-22 to 2027-04-24", "location": "West Cambridge Tech Hub"},
+        {"name": "May Week Bumps & The Cambridge Union Gala", "category": "cultural", "date": "2027-06-15 to 2027-06-18", "location": "River Cam & Trinity College Lawns"},
+        {"name": "Michaelmas Union Open", "category": "debating", "date": "2026-11-12 to 2026-11-14", "location": "Bridge Street Debating Chamber"}
+    ]
+}

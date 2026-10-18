@@ -1,0 +1,7 @@
+{
+    "events": [
+        {"name": "TechNova 2026", "category": "technical", "date": "2026-10-12 to 2026-10-14", "location": "Main Campus Computing Block"},
+        {"name": "Symphony", "category": "cultural", "date": "2027-03-05 to 2027-03-07", "location": "Apex Main Auditorium"},
+        {"name": "Apex Spardha", "category": "sports", "date": "2027-02-10 to 2027-02-12", "location": "University Sports Complex"}
+    ]
+}

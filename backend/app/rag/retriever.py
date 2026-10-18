@@ -38,11 +38,11 @@ def retrieve(domain: str, query: str, tenant_id: str = "apex_university", k: int
     except Exception:
         results = None
 
-    # Fallback to general query if tenant-filtered returns nothing (for apex default demo data)
-    if not results or not results.get("documents") or not results["documents"][0]:
+    # Fallback to general query ONLY for apex_university legacy chunks
+    if (not results or not results.get("documents") or not results["documents"][0]) and tenant_id == "apex_university":
         results = collection.query(**query_kwargs)
         
-    if not results.get("documents") or not results["documents"][0]:
+    if not results or not results.get("documents") or not results["documents"][0]:
         return []
         
     chunks = []
@@ -59,10 +59,14 @@ def retrieve(domain: str, query: str, tenant_id: str = "apex_university", k: int
         doc = results["documents"][0][i]
         meta = results["metadatas"][0][i]
         
-        # Guardrail: check tenant isolation on metadata if present
+        # Guardrail: check tenant isolation on metadata
         chunk_tenant = meta.get("tenant_id")
-        if chunk_tenant and chunk_tenant != tenant_id:
-            continue
+        if chunk_tenant:
+            if chunk_tenant != tenant_id:
+                continue
+        else:
+            if tenant_id != "apex_university":
+                continue
 
         chunks.append({
             "text": doc,
