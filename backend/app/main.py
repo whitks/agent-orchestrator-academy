@@ -55,9 +55,9 @@ async def startup():
     init_db()
 
 # Resolve tenant helper (from query, header, or API key)
-def resolve_tenant(tenant_id: Optional[str] = None, x_api_key: Optional[str] = Header(None)) -> dict:
-    if x_api_key:
-        tenant = get_tenant_by_api_key(x_api_key)
+def resolve_tenant(tenant_id: Optional[str] = None, api_key: Optional[str] = None) -> dict:
+    if api_key and isinstance(api_key, str):
+        tenant = get_tenant_by_api_key(api_key)
         if tenant:
             return tenant
     t_id = tenant_id or "apex_university"
@@ -90,14 +90,14 @@ async def get_tenant_config(tenant_id: str):
 
 @app.post("/chat", response_model=ChatResponse)
 @limiter.limit("30/minute")
-async def chat(request: Request, req: ChatRequest):
-    tenant = resolve_tenant(req.tenant_id)
+async def chat(request: Request, req: ChatRequest, x_api_key: Optional[str] = Header(None)):
+    tenant = resolve_tenant(req.tenant_id, api_key=x_api_key)
     return await orchestrator.handle(req.session_id, req.message, tenant_id=tenant["tenant_id"])
 
 @app.get("/chat/stream")
 @limiter.limit("30/minute")
-async def chat_stream(request: Request, session_id: str, message: str, tenant_id: Optional[str] = "apex_university"):
-    tenant = resolve_tenant(tenant_id)
+async def chat_stream(request: Request, session_id: str, message: str, tenant_id: Optional[str] = "apex_university", x_api_key: Optional[str] = Header(None)):
+    tenant = resolve_tenant(tenant_id, api_key=x_api_key)
     t_id = tenant["tenant_id"]
 
     # Security Origin Guardrail
