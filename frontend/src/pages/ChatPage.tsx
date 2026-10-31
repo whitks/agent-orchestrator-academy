@@ -10,8 +10,6 @@ import {
   ShieldCheck, 
   GraduationCap, 
   MessageSquare, 
-  ThumbsUp, 
-  ThumbsDown, 
   Bot, 
   Building, 
   Code
@@ -468,32 +466,22 @@ export default function ChatPage() {
                         </div>
                       )}
 
-                      {/* Primary Actions & Feedback */}
-                      <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex flex-wrap items-center gap-2.5">
-                          <button
-                            onClick={() => sendMessage("Can you assist me with filing an official request for this?")}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
-                          >
-                            <GraduationCap className="w-4 h-4" />
-                            <span>File Student Request</span>
-                          </button>
-                          <button
-                            onClick={() => sendMessage("Connect me with academic advisor")}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/70 text-slate-700 text-xs font-medium transition-colors cursor-pointer"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5 text-slate-500" />
-                            <span>Talk to Academic Advisor</span>
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-1 text-slate-400">
-                          <button className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors text-slate-500 cursor-pointer" title="Helpful answer">
-                            <ThumbsUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors text-slate-500 cursor-pointer" title="Not helpful">
-                            <ThumbsDown className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                      {/* Primary Actions */}
+                      <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2.5">
+                        <button
+                          onClick={() => sendMessage("Can you assist me with filing an official request for this?")}
+                          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
+                        >
+                          <GraduationCap className="w-4 h-4" />
+                          <span>File Student Request</span>
+                        </button>
+                        <button
+                          onClick={() => sendMessage("Connect me with academic advisor")}
+                          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/70 text-slate-700 text-xs font-medium transition-colors cursor-pointer"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Talk to Academic Advisor</span>
+                        </button>
                       </div>
                     </div>
                   </div>
