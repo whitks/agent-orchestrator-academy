@@ -58,10 +58,14 @@ WIDGET_DIR = Path(__file__).parent / "static"
 WIDGET_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(WIDGET_DIR)), name="static")
 
-# Mount test external site directory for one-click testing
+# Mount test external site directories for one-click testing
 TEST_DIR = Path(__file__).resolve().parent.parent.parent / "test"
 if TEST_DIR.exists():
     app.mount("/test", StaticFiles(directory=str(TEST_DIR), html=True), name="test")
+
+TEST2_DIR = Path(__file__).resolve().parent.parent.parent / "test2"
+if TEST2_DIR.exists():
+    app.mount("/test2", StaticFiles(directory=str(TEST2_DIR), html=True), name="test2")
 
 @app.on_event("startup")
 async def startup():
