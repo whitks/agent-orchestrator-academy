@@ -12,7 +12,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   const [activeTab, setActiveTab] = useState<'college' | 'superadmin'>('college');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedTenant, setSelectedTenant] = useState('stanford_global');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -192,21 +191,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
 
         {/* Form Login */}
         <form onSubmit={handleStandardSubmit} className="space-y-3 mt-2">
-          {activeTab === 'college' && (
-            <div>
-              <label className="block text-slate-700 text-xs font-semibold mb-1">Select College</label>
-              <select
-                value={selectedTenant}
-                onChange={(e) => setSelectedTenant(e.target.value)}
-                className="w-full text-xs font-medium px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-              >
-                <option value="stanford_global">Stanford Global Campus</option>
-                <option value="apex_university">Apex Institute of Technology</option>
-                <option value="cambridge_tech">Cambridge Institute of Science</option>
-              </select>
-            </div>
-          )}
-
           <div>
             <label className="block text-slate-700 text-xs font-semibold mb-1">Institutional Email</label>
             <input
