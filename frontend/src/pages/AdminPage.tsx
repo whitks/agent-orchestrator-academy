@@ -1,15 +1,24 @@
 import { useEffect, useState } from 'react';
-import { api, type Tenant, type TenantDocument } from '../api/client';
+import { api, type Tenant, type TenantDocument, type UserProfile } from '../api/client';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { 
   ShieldAlert, BarChart3, Clock, AlertCircle, RefreshCw, FileText, 
-  Building, Key, Upload, Trash2, Calendar, CheckCircle2, Plus
+  Building, Key, Upload, Trash2, Calendar, CheckCircle2, Plus, Lock
 } from 'lucide-react';
 
-export default function AdminPage() {
+interface AdminPageProps {
+  currentUser?: UserProfile;
+}
+
+export default function AdminPage({ currentUser }: AdminPageProps) {
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState<string>('stanford_global');
-  const [activeTab, setActiveTab] = useState<'analytics' | 'documents' | 'rules' | 'escalations'>('analytics');
+  // If college admin is logged in, strictly enforce their assigned college
+  const initialTenant = (currentUser?.role === 'college_admin' && currentUser?.tenant_id)
+    ? currentUser.tenant_id
+    : 'stanford_global';
+
+  const [selectedTenantId, setSelectedTenantId] = useState<string>(initialTenant);
+  const [activeTab, setActiveTab] = useState<'analytics' | 'documents' | 'rules' | 'escalations'>('documents');
   
   // Data states
   const [metrics, setMetrics] = useState<any>(null);
@@ -34,6 +43,13 @@ export default function AdminPage() {
       }
     }).catch(() => {});
   }, []);
+
+  // Update tenant when logged in user changes
+  useEffect(() => {
+    if (currentUser?.role === 'college_admin' && currentUser?.tenant_id) {
+      setSelectedTenantId(currentUser.tenant_id);
+    }
+  }, [currentUser]);
 
   const fetchTenantData = (tenantId: string) => {
     setLoading(true);
@@ -129,22 +145,34 @@ export default function AdminPage() {
           </p>
         </div>
 
-        {/* Tenant Filter Selector */}
+        {/* Tenant Filter Selector / Lock Badge */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-white border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
-            <Building size={14} className="text-indigo-600 shrink-0" />
-            <select
-              value={selectedTenantId}
-              onChange={(e) => setSelectedTenantId(e.target.value)}
-              className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
-            >
-              {tenants.map(t => (
-                <option key={t.tenant_id} value={t.tenant_id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {currentUser?.role === 'college_admin' ? (
+            <div className="flex items-center gap-2 bg-indigo-50/80 border border-indigo-200/80 rounded-xl px-3 py-1.5 shadow-2xs">
+              <Lock size={13} className="text-indigo-600 shrink-0" />
+              <span className="text-xs font-bold text-indigo-950">
+                {activeTenant.name}
+              </span>
+              <span className="text-[10px] font-mono text-indigo-500 uppercase bg-white/80 px-1.5 py-0.5 rounded border border-indigo-100">
+                {activeTenant.slug}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-white border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <Building size={14} className="text-indigo-600 shrink-0" />
+              <select
+                value={selectedTenantId}
+                onChange={(e) => setSelectedTenantId(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                {tenants.map(t => (
+                  <option key={t.tenant_id} value={t.tenant_id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             onClick={() => fetchTenantData(selectedTenantId)}

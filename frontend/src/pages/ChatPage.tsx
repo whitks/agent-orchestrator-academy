@@ -14,7 +14,7 @@ import {
   Building, 
   Code
 } from 'lucide-react';
-import type { TraceEvent, Tenant } from '../api/client';
+import type { TraceEvent, Tenant, UserProfile } from '../api/client';
 import { api } from '../api/client';
 import { AgentFlowchart } from '../components/AgentFlowchart';
 import type { FlowchartState } from '../components/AgentFlowchart';
@@ -54,9 +54,16 @@ const INITIAL_FLOWCHART: FlowchartState = {
   synthesizer: { status: 'idle' },
 };
 
-export default function ChatPage() {
+interface ChatPageProps {
+  currentUser?: UserProfile;
+}
+
+export default function ChatPage({ currentUser }: ChatPageProps) {
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState<string>('apex_university');
+  const initialTenant = (currentUser?.role === 'college_admin' && currentUser?.tenant_id)
+    ? currentUser.tenant_id
+    : 'apex_university';
+  const [selectedTenantId, setSelectedTenantId] = useState<string>(initialTenant);
   const [showEmbedModal, setShowEmbedModal] = useState<boolean>(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -74,6 +81,16 @@ export default function ChatPage() {
       }
     }).catch(() => {});
   }, []);
+
+  // Keep in sync with logged in college admin
+  useEffect(() => {
+    if (currentUser?.role === 'college_admin' && currentUser?.tenant_id) {
+      setSelectedTenantId(currentUser.tenant_id);
+      setSession(`sess-${Math.random().toString(36).substr(2, 6)}`);
+      setMessages([]);
+      setActiveFlowchart(INITIAL_FLOWCHART);
+    }
+  }, [currentUser]);
 
   const activeTenant = tenants.find(t => t.tenant_id === selectedTenantId) || {
     tenant_id: 'apex_university',
@@ -277,21 +294,35 @@ export default function ChatPage() {
       <div className="bg-white border-b border-slate-200/60 px-4 sm:px-6 py-2.5 shrink-0">
         <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-500 uppercase tracking-wider text-[11px] flex items-center gap-1">
-              <Building size={13} className="text-indigo-600" />
-              Active Institution Playground:
-            </span>
-            <select
-              value={selectedTenantId}
-              onChange={(e) => handleTenantChange(e.target.value)}
-              className="bg-slate-50 border border-slate-200 text-slate-800 font-semibold rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer text-xs"
-            >
-              {tenants.map(t => (
-                <option key={t.tenant_id} value={t.tenant_id}>
-                  {t.name} ({t.slug})
-                </option>
-              ))}
-            </select>
+            {currentUser?.role === 'college_admin' ? (
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-500 uppercase tracking-wider text-[11px] flex items-center gap-1">
+                  <Building size={13} className="text-indigo-600" />
+                  Your Enrolled Campus:
+                </span>
+                <span className="bg-indigo-50 border border-indigo-200 text-indigo-900 font-bold rounded-xl px-3 py-1.5 text-xs">
+                  {activeTenant.name}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-500 uppercase tracking-wider text-[11px] flex items-center gap-1">
+                  <Building size={13} className="text-indigo-600" />
+                  Active Institution Playground:
+                </span>
+                <select
+                  value={selectedTenantId}
+                  onChange={(e) => handleTenantChange(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 text-slate-800 font-semibold rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer text-xs"
+                >
+                  {tenants.map(t => (
+                    <option key={t.tenant_id} value={t.tenant_id}>
+                      {t.name} ({t.slug})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">

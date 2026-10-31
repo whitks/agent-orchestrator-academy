@@ -157,8 +157,8 @@ function App() {
         />
         <div className="flex-1 flex flex-col">
           <Routes>
-            <Route path="/" element={<ChatPage />} />
-            <Route path="/admin" element={<AdminPage />} />
+            <Route path="/" element={<ChatPage currentUser={currentUser} />} />
+            <Route path="/admin" element={<AdminPage currentUser={currentUser} />} />
             <Route path="/superadmin" element={<SuperAdminPage />} />
           </Routes>
         </div>
